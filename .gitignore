@@ -12,3 +12,6 @@ venv/
 
 # HuggingFace cache
 .cache/
+
+# Environmnet variables
+.env

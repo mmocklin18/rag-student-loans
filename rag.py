@@ -1,16 +1,19 @@
 import os
+from dotenv import load_dotenv
 import json
-import numpy as np
-from numpy.linalg import norm
-from sentence_transformers import SentenceTransformer
-from transformers import pipeline
+from langchain_openai import OpenAIEmbeddings
+from langchain_anthropic import ChatAnthropic
+from langchain_community.vectorstores import FAISS
+from langchain.docstore.document import Document
+from langchain.chains import RetrievalQA
 
+load_dotenv()
 
-
+# Load your docs
 with open("data/cfpb_docs.json") as f:
     docs = json.load(f)
 
-# Break each doc into smaller chunks
+# Break each doc into smaller chunks TODO: Split into chunks at paragraph / sentence ends
 def chunk_text(text, chunk_size=300, overlap=50):
     words = text.split()
     chunks = []
@@ -19,55 +22,41 @@ def chunk_text(text, chunk_size=300, overlap=50):
         chunks.append(chunk)
     return chunks
 
-texts = []
+#Turn docs into langchain documents
+documents = []
 for doc in docs:
-    texts.extend(chunk_text(doc["answer"], chunk_size=300, overlap=50))
+   for chunk in chunk_text(doc["answer"]):
+        documents.append(Document(
+            page_content=chunk,
+            metadata={
+                "source": doc.get("url", "unknown")
+            }))
+        
+# Embeddings
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 
+# Build FAISS vectorstore
+vectorstore = FAISS.from_documents(documents, embeddings)
 
-embedder = SentenceTransformer("all-MiniLM-L6-v2") 
-embeddings = embedder.encode(texts, convert_to_numpy=True)
+# Retriever
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
+# Claude 3 haiku LLM
+llm = ChatAnthropic(model="claude-3-haiku-20240307", temperature=0.3, max_tokens=300)
 
-# NumPy cosine similarity search
-def search(query, k=1):
-    q_emb = embedder.encode([query], convert_to_numpy=True)
-    sims = np.dot(embeddings, q_emb.T) / (norm(embeddings, axis=1) * norm(q_emb))
-    top_k = sims.argsort()[-k:][::-1]       
-    top_k = top_k.flatten().tolist()    
-    return [texts[i] for i in top_k]
-
-
-
-qa_model = pipeline(
-    "text2text-generation",
-    model="google/flan-t5-base",  
-    device=-1
+# Chain to inject relevant documents into LLM prompt
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever,
+    chain_type="stuff",   
+    return_source_documents=True
 )
 
 
-def truncate_context(context, max_words=300):
-    words = context.split()
-    if len(words) > max_words:
-        return " ".join(words[:max_words])
-    return context
-
-
-def answer_query(query, k=3):
-    context = "\n\n".join(search(query, k))
-    context = truncate_context(context, max_words=300)
-
-    prompt = (
-        f"Answer the question using the context below.\n\n"
-        f"Question: {query}\n\n"
-        f"Context:\n{context}\n\n"
-        f"Answer:"
-    )
-    result = qa_model(prompt, max_new_tokens=200, do_sample=True, temperature=0.3)
-    return result[0]["generated_text"]
-
-
 if __name__ == "__main__":
-    question = "What are Perkins loans and what makes them different from normal loans?"
-    answer = answer_query(question, k=3)
+    question = "What are perkins loans"
+    result = qa_chain.invoke({"query": question})
+
     print("\nQUESTION:", question)
-    print("\nANSWER:", answer)
+    print("\nANSWER:", result["result"])
+    print("\nSOURCES:", [doc.metadata["source"] for doc in result["source_documents"]])
