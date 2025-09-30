@@ -6,6 +6,8 @@ from langchain_anthropic import ChatAnthropic
 from langchain_community.vectorstores import FAISS
 from langchain.docstore.document import Document
 from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 
 load_dotenv()
 
@@ -13,24 +15,28 @@ load_dotenv()
 with open("data/cfpb_docs.json") as f:
     docs = json.load(f)
 
-# Break each doc into smaller chunks TODO: Split into chunks at paragraph / sentence ends
-def chunk_text(text, chunk_size=300, overlap=50):
-    words = text.split()
-    chunks = []
-    for i in range(0, len(words), chunk_size - overlap):
-        chunk = " ".join(words[i:i+chunk_size])
-        chunks.append(chunk)
-    return chunks
+# Break each doc into smaller chunks 
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=600,      
+    chunk_overlap=50,    
+    separators=["\n\n", "\n", ". ", " ", ""]  
+)
 
 #Turn docs into langchain documents
 documents = []
 for doc in docs:
-   for chunk in chunk_text(doc["answer"]):
+    text = doc.get("answer", "")
+    chunks = text_splitter.split_text(text)
+    for chunk in chunks:
         documents.append(Document(
             page_content=chunk,
-            metadata={
-                "source": doc.get("url", "unknown")
-            }))
+            metadata={"source": doc.get("url", "unknown")}
+        ))
+
+for i, doc in enumerate(documents[:5]):  # show first 5
+    print(f"\n--- Chunk {i} ---")
+    print(doc.page_content)
+    print("Source:", doc.metadata["source"])
         
 # Embeddings
 embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -54,7 +60,7 @@ qa_chain = RetrievalQA.from_chain_type(
 
 
 if __name__ == "__main__":
-    question = "What are perkins loans"
+    question = "What happens if I don't pay my loans on time?"
     result = qa_chain.invoke({"query": question})
 
     print("\nQUESTION:", question)

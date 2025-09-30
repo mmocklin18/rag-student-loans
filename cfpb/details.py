@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import time
-from .config import CFPB_BOILERPLATE
+from ..src.config import CFPB_BOILERPLATE
 
 
 def scrape_all_details(urls):

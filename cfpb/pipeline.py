@@ -1,7 +1,7 @@
 from .listing import get_all_listings_urls
 from .details import scrape_all_details
-from .saver import save_json
-from .config import LISTING_PAGES
+from ..src.saver import save_json
+from ..src.config import LISTING_PAGES
 
 
 def run_pipeline(output_path="data/cfpb_docs.json"):
@@ -10,3 +10,7 @@ def run_pipeline(output_path="data/cfpb_docs.json"):
     records = scrape_all_details(listing_urls)
     save_json(records,output_path)
     return records
+
+
+if __name__ == "__main__":
+    run_pipeline()
