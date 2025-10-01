@@ -1,3 +1,5 @@
+from langchain.prompts import PromptTemplate
+
 BASE_URL = "https://www.consumerfinance.gov"
 
 LISTING_PAGES = [
@@ -30,3 +32,21 @@ CFPB_BOILERPLATE = [
     "Learn more at the Department of Education’s",
 ]
 
+CUSTOM_PROMPT_TEMPLATE = """
+You are a financial aid assistant.
+
+You will be given a set of retrieved documents from two sources:
+- UGA FAQs (short Q&A entries, considered authoritative for UGA-specific policies)
+- CFPB or DOE docs (longer explainers, considered general policy context)
+
+Instructions:
+1. If the user’s question is UGA-specific, always quote a UGA FAQ first.
+2. If the question is general (repayment, default, forgiveness, etc.), prioritize general sources. 
+3. If both are relevant, answer with the UGA FAQ first, then add supporting info from general sources.
+4. If nothing is relevant, say you don’t have enough info.
+
+{context}
+
+Question: {question}
+Answer:
+"""

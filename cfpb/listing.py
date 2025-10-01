@@ -2,7 +2,7 @@ from typing import List
 import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from ..src.config import BASE_URL
+from ..config import BASE_URL
 
 def get_all_listings_urls(listing_pages: List[str]) -> List[str]:
     """
