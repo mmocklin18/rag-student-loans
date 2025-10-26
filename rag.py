@@ -10,6 +10,13 @@ from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
+from langchain.schema import BaseRetriever
+from sentence_transformers import CrossEncoder
+from langchain.prompts import PromptTemplate
+
+
+import numpy as np
+
 
 
 
@@ -43,12 +50,20 @@ for doc in all_docs:
         text = a
 
     chunks = text_splitter.split_text(text)
+    # Add source label
     for chunk in chunks:
-        documents.append(Document(
-            page_content=chunk,
-            metadata={"source": doc.get("url", "unknown")}
-        ))
+        source_url = doc.get("url", "unknown")
+        if "uga.edu" in source_url.lower():
+            label = "UGA FAQ"
+        elif any(x in source_url.lower() for x in ["consumerfinance.gov", "studentaid.gov", "ed.gov"]):
+            label = "CFPB/DOE"
+        else:
+            label = "General Source"
 
+        documents.append(Document(
+            page_content=f"[{label}] {chunk}",
+            metadata={"source": source_url, "source_type": label}
+        ))
 
         
 # Embeddings
@@ -57,11 +72,30 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 # Build FAISS vectorstore
 vectorstore = FAISS.from_documents(documents, embeddings)
 
-# Retriever
-retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+# Retriever with reranking algorithm
+base_retriever = vectorstore.as_retriever(search_kwargs={"k": 25})
+cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+
+def rerank_retrieve(query):
+    base_docs = base_retriever.vectorstore.similarity_search(query, k=25)
+    pairs = [(query, d.page_content) for d in base_docs]
+    scores = cross_encoder.predict(pairs)
+    for d, s in zip(base_docs, scores):
+        d.metadata["rerank_score"] = float(s)
+    return sorted(base_docs, key=lambda d: d.metadata["rerank_score"], reverse=True)[:5]
+
+# Custom reranker with proper typing and methods
+class RerankRetriever(BaseRetriever):
+    def __init__(self):
+        super().__init__()
+
+    def _get_relevant_documents(self, query):
+        return rerank_retrieve(query)
+    
+retriever = RerankRetriever()
 
 # Claude 3 haiku LLM
-llm = ChatAnthropic(model="claude-3-haiku-20240307", temperature=0.3, max_tokens=300)
+llm = ChatAnthropic(model="claude-3-haiku-20240307", temperature=0.3, max_tokens=400)
 
 
 CUSTOM_PROMPT = PromptTemplate(
@@ -75,7 +109,10 @@ qa_chain = RetrievalQA.from_chain_type(
     retriever=retriever,
     chain_type="stuff",   
     return_source_documents=True,
-    chain_type_kwargs={"prompt": CUSTOM_PROMPT},
+    chain_type_kwargs={
+        "prompt": CUSTOM_PROMPT,
+        "document_separator": "\n\n"
+    },
 
 )
 
@@ -83,7 +120,7 @@ qa_chain = RetrievalQA.from_chain_type(
 if __name__ == "__main__":
     question = "How do I pay off my loans if I don't have the money right now?"
     result = qa_chain.invoke({"query": question})
-
+    
     print("\nQUESTION:", question)
     print("\nANSWER:", result["result"])
     print("\n--- Retrieved Chunks ---")
