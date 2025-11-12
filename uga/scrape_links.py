@@ -5,14 +5,14 @@ from urllib.parse import urljoin, urlparse
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 
-BASE_URL = "https://osfa.uga.edu/resources/policies/"
-OUTPUT_FILE = "../data/uga_policies.json"
+BASE_URL = "https://osfa.uga.edu/resources/"
+OUTPUT_FILE = "../data/uga_resources.json"
 
 
 def allowed(u: str) -> bool:
     try:
         p = urlparse(u)
-        return p.netloc == "osfa.uga.edu" and p.path.startswith("/resources/policies/")
+        return p.netloc == "osfa.uga.edu"
     except Exception:
         return False
 
@@ -38,16 +38,19 @@ def scrape_leaf(url: str, page) -> list:
     return docs
 
 
-def crawl_boxes(url: str, page, visited: set, all_docs: list):
+def crawl_boxes(url: str, browser, visited: set, all_docs: list):
     """DFS crawl: follow portal box links; if none, scrape this page."""
     norm = url.split("#")[0]
     if norm in visited:
         return
     visited.add(norm)
 
+    #Open a new page for this recursion level
+    page = browser.new_page()
+
     print(f"\n Visiting: {url}")
-    page.goto(url, timeout=60000)
     try:
+        page.goto(url, timeout=60000)
         page.wait_for_selector("div.portal_item, div.entry, main#main, article", timeout=15000)
     except Exception:
         pass
@@ -55,27 +58,27 @@ def crawl_boxes(url: str, page, visited: set, all_docs: list):
     html = page.content()
     soup = BeautifulSoup(html, "html.parser")
 
-    #find box links
+    #find box links (unchanged)
     box_links = []
-    for a in soup.select("div.portal_item div.box_hover a"):
+    for a in soup.select("div.portal_item div.box_hover a, div.portal_item h4.post_title a"):
         href = a.get("href")
         if not href:
             continue
         full = urljoin(url, href)
+        print(f"    [FOUND] {full}")
         if allowed(full):
             box_links.append(full)
 
     box_links = sorted(set(box_links))
 
-    # If any box links are found, recursively search deeper
+    # recurse if nested links exist
     if box_links:
         print(f"  + {len(box_links)} box link(s) found")
         for link in box_links:
-            time.sleep(10)  # respect crawl-delay
-            crawl_boxes(link, page, visited, all_docs)
-
-    # Base case: if no more links, scrape page for docs
+            time.sleep(10)  # respect crawl-delay!!!
+            crawl_boxes(link, browser, visited, all_docs)
     else:
+        # base case: leaf page
         try:
             docs = scrape_leaf(url, page)
             if docs:
@@ -86,6 +89,10 @@ def crawl_boxes(url: str, page, visited: set, all_docs: list):
         except Exception as e:
             print(f"scrape failed: {e}")
 
+    # close the page before returning to parent
+    page.close()
+
+
 
 if __name__ == "__main__":
     visited = set()
@@ -93,9 +100,9 @@ if __name__ == "__main__":
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        crawl_boxes(BASE_URL, page, visited, all_docs)
+        crawl_boxes(BASE_URL, browser, visited, all_docs)
         browser.close()
+
 
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     with open(OUTPUT_FILE, "w") as f:

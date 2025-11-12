@@ -58,7 +58,7 @@ for doc in all_docs:
         elif any(x in source_url.lower() for x in ["consumerfinance.gov", "studentaid.gov", "ed.gov"]):
             label = "CFPB/DOE"
         else:
-            label = "General Source"
+            label = "Other Source"
 
         documents.append(Document(
             page_content=f"[{label}] {chunk}",
